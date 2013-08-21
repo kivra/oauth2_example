@@ -51,7 +51,7 @@ init(_Transport, _Req, _Opts) ->
     %% form in the implicit grant flow.
     ok = erlydtl:compile(filename:join(["priv", "static", "auth_form.dtl"]),
                          auth_form),
-    {upgrade, protocol, cowboy_http_rest}.
+    {upgrade, protocol, cowboy_rest}.
 
 rest_init(Req, _Opts) ->
     {ok, Req, undefined_state}.
@@ -65,10 +65,10 @@ content_types_accepted(Req, State) ->
      Req, State}.
 
 allowed_methods(Req, State) ->
-    {['POST', 'GET'], Req, State}.
+    {[<<"POST">>, <<"GET">>], Req, State}.
 
 process_post(Req, State) ->
-    {ok, Body, Req2} = cowboy_http_req:body(Req),
+    {ok, Body, Req2} = cowboy_req:body(Req),
     Params = decode_form(Body),
     {ok, Reply} =
         case lists:max([proplists:get_value(K, Params)
@@ -80,19 +80,19 @@ process_post(Req, State) ->
             <<"token">> ->
                 process_implicit_grant_stage2(Req2, Params);
             _ ->
-                cowboy_http_req:reply(400, [], <<"Bad Request.">>, Req2)
+                cowboy_req:reply(400, [], <<"Bad Request.">>, Req2)
         end,
     {halt, Reply, State}.
 
 process_get(Req, State) ->
-    {ResponseType, Req2} = cowboy_http_req:qs_val(<<"response_type">>, Req),
+    {ResponseType, Req2} = cowboy_req:qs_val(<<"response_type">>, Req),
     {ok, Reply} =
         case ResponseType of
             <<"token">> ->
                 {Req3, Params} =
                     lists:foldl(fun(Name, {R, Acc}) ->
                                         {Val, R2} =
-                                            cowboy_http_req:qs_val(Name, R),
+                                            cowboy_req:qs_val(Name, R),
                                         {R2, [{Name, Val}|Acc]}
                                 end,
                                 {Req2, []},
@@ -103,7 +103,7 @@ process_get(Req, State) ->
                 process_implicit_grant(Req3, Params);
             _ ->
                 JSON = jsx:encode([{error, <<"unsupported_response_type">>}]),
-                cowboy_http_req:reply(400, [], JSON, Req2)
+                cowboy_req:reply(400, [], JSON, Req2)
         end,
     {halt, Reply, State}.
 
@@ -115,14 +115,15 @@ process_password_grant(Req, Params) ->
     Username = proplists:get_value(<<"username">>, Params),
     Password = proplists:get_value(<<"password">>, Params),
     Scope    = proplists:get_value(<<"scope">>, Params, <<"">>),
-    emit_response(oauth2:authorize_password(Username, Password, Scope), Req).
+    Auth     = oauth2:authorize_password(Username, Password, Scope, []),
+    issue_token(Auth, Req).
 
 process_client_credentials_grant(Req, Params) ->
     {<<"Basic ", Credentials/binary>>, Req2} =
-        cowboy_http_req:header('Authorization', Req),
+        cowboy_req:header(<<"authorization">>, Req),
     [Id, Secret] = binary:split(base64:decode(Credentials), <<":">>),
     Scope = proplists:get_value(<<"scope">>, Params),
-    emit_response(oauth2:authorize_client_credentials(Id, Secret, Scope), Req2).
+    emit_response(oauth2:authorize_client_credentials(Id, Secret, Scope, []), Req2).
 
 process_implicit_grant(Req, Params) ->
     State       = proplists:get_value(<<"state">>, Params),
@@ -138,7 +139,7 @@ process_implicit_grant(Req, Params) ->
                                            {client_id, ClientId},
                                            {state, State},
                                            {scope, Scope}]),
-            cowboy_http_req:reply(200, [], Html, Req);
+            cowboy_req:reply(200, [], Html, Req);
         %% TODO: Return an OAuth2 response code here.
         %% The returned Reason might not be valid in an OAuth2 context.
         {error, Reason} ->
@@ -173,22 +174,27 @@ process_implicit_grant_stage2(Req, Params) ->
             %% supposedly verified in the previous step, so
             %% someone must have been tampering with the
             %% hidden form values.
-            cowboy_http_req:reply(400, Req)
+            cowboy_req:reply(400, Req)
     end.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
+issue_token({ok, Auth}, Req) ->
+    emit_response(oauth2:issue_token(Auth, []), Req);
+issue_token(Error, Req) ->
+    emit_response(Error, Req).
+
 emit_response(AuthResult, Req) ->
     {Code, JSON} =
         case AuthResult of
-            {ok, Response} ->
-                {200, jsx:encode(oauth2_response:to_proplist(Response))};
             {error, Reason} ->
-                {400, jsx:encode([{error, to_binary(Reason)}])}
+                {400, jsx:encode([{error, to_binary(Reason)}])};
+            Response ->
+                {200, jsx:encode(to_json_term(oauth2_response:to_proplist(Response), []))}
         end,
-    cowboy_http_req:reply(Code, [], JSON, Req).
+    cowboy_req:reply(Code, [], JSON, Req).
 
 decode_form(Form) ->
     RawForm = cowboy_http:urldecode(Form),
@@ -207,8 +213,8 @@ redirect_resp(RedirectUri, FragParams, Req) ->
                           (cowboy_http:urlencode(V))/binary>>
                             || {K, V} <- FragParams],
                        <<"&">>),
-    Header = [{'Location', <<RedirectUri/binary, "#", Frag/binary>>}],
-    cowboy_http_req:reply(302, Header, <<>>, Req).
+    Header = [{<<"location">>, <<RedirectUri/binary, "#", Frag/binary>>}],
+    cowboy_req:reply(302, Header, <<>>, Req).
 
 binary_join([H], _Sep) ->
     <<H/binary>>;
@@ -216,3 +222,10 @@ binary_join([H|T], Sep) ->
     <<H/binary, Sep/binary, (binary_join(T, Sep))/binary>>;
 binary_join([], _Sep) ->
     <<>>.
+
+to_json_term([], Acc) ->
+    Acc;
+to_json_term([{H, {HK, HV}} |  T], Acc) ->
+    to_json_term(T, [{H, <<"{",HK/binary,",",HV/binary,"}">>} | Acc]);
+to_json_term([H | T], Acc) ->
+    to_json_term(T, [H | Acc]).

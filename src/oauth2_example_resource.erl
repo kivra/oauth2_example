@@ -47,19 +47,19 @@
 %%% Cowboy callbacks
 %%%===================================================================
 
-init(_Transport, _Req, _Opts) ->
-    {upgrade, protocol, cowboy_http_rest}.
+init(_Transport, _Req, _Init) ->
+    {upgrade, protocol, cowboy_rest}.
 
 rest_init(Req, _Opts) ->
     {ok, Req, undefined_state}.
 
 allowed_methods(Req, State) ->
-    {['GET', 'PUT'], Req, State}.
+    {[<<"GET">>, <<"PUT">>], Req, State}.
 
 is_authorized(Req, State) ->
     case get_access_token(Req) of
         {ok, Token} ->
-            case oauth2:verify_access_token(Token) of
+            case oauth2:verify_access_token(Token, []) of
                 {ok, _Identity} ->
                     {true, Req, State};
                 {error, access_denied} ->
@@ -76,21 +76,21 @@ content_types_accepted(Req, State) ->
     {[{{<<"application">>, <<"json">>, []}, process_put}], Req, State}.
 
 process_put(Req, State) ->
-    {ok, cowboy_http_req:reply(201, Req), State}.
+    {true, Req, State}.
 
 process_get(Req, State) ->
-    {ok, cowboy_http_req:reply(204, Req), State}.
+    {<<>>, Req, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
 get_access_token(Req) ->
-    case cowboy_http_req:header('Authorization', Req) of
+    case cowboy_req:header(<<"authorization">>, Req) of
         {<<"Bearer ", Token/binary>>, _Req} ->
             {ok, Token};
         _ ->
-            case cowboy_http_req:qs_val(<<"access_token">>, Req) of
+            case cowboy_req:qs_val(<<"access_token">>, Req) of
                 {Token, _Req} ->
                     {ok, Token};
                 _ ->

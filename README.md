@@ -31,7 +31,7 @@ Now that we have a user set up, we can authenticate through the
     < Date: Fri, 03 Aug 2012 08:28:00 GMT
     < Server: Cowboy
     < Connection: keep-alive
-    < 
+    <
     {
         "access_token": "1t4VDlrqpgzih1OEd6lkoMkSndeA9p1y",
         "expires_in": "3600",

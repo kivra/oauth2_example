@@ -26,6 +26,8 @@
 
 -module(oauth2_example_backend).
 
+-behavior(oauth2_backend).
+
 %%% API
 -export([
          start/0
@@ -36,20 +38,32 @@
          ,delete_client/1
         ]).
 
-%%% OAuth2 backend functionality
--export([
-         authenticate_username_password/3
-         ,authenticate_client/3
-         ,associate_access_token/2
-         ,resolve_access_token/1
-         ,get_redirection_uri/1
-        ]).
+%%% Behavior API
+-export([authenticate_username_password/3]).
+-export([authenticate_client/3]).
+-export([get_client_identity/2]).
+-export([associate_access_code/3]).
+-export([associate_refresh_token/3]).
+-export([associate_access_token/3]).
+-export([resolve_access_code/2]).
+-export([resolve_refresh_token/2]).
+-export([resolve_access_token/2]).
+-export([revoke_access_code/2]).
+-export([revoke_access_token/2]).
+-export([revoke_refresh_token/2]).
+-export([get_redirection_uri/2]).
+-export([verify_redirection_uri/3]).
+-export([verify_client_scope/3]).
+-export([verify_resowner_scope/3]).
+-export([verify_scope/3]).
 
 -define(ACCESS_TOKEN_TABLE, access_tokens).
+-define(REFRESH_TOKEN_TABLE, refresh_tokens).
 -define(USER_TABLE, users).
 -define(CLIENT_TABLE, clients).
 
 -define(TABLES, [?ACCESS_TOKEN_TABLE,
+                 ?REFRESH_TOKEN_TABLE,
                  ?USER_TABLE,
                  ?CLIENT_TABLE]).
 
@@ -101,12 +115,12 @@ delete_client(Id) ->
 %%% OAuth2 backend functions
 %%%===================================================================
 
-authenticate_username_password(Username, Password, Scope) ->
+authenticate_username_password(Username, Password, _) ->
     case get(?USER_TABLE, Username) of
         {ok, #user{password = UserPw}} ->
             case Password of
                 UserPw ->
-                    {ok, {<<"user">>, Username}, Scope};
+                    {ok, {<<"user">>, Username}};
                 _ ->
                     {error, badpass}
             end;
@@ -114,20 +128,41 @@ authenticate_username_password(Username, Password, Scope) ->
             Error
     end.
 
-authenticate_client(ClientId, ClientSecret, Scope) ->
+authenticate_client(ClientId, ClientSecret, _) ->
     case get(?CLIENT_TABLE, ClientId) of
         {ok, #client{client_secret = ClientSecret}} ->
-            {ok, {<<"client">>, ClientId}, Scope};
+            {ok, {<<"client">>, ClientId}};
         {ok, #client{client_secret = _WrongSecret}} ->
             {error, badsecret};
         _ ->
             {error, notfound}
     end.
 
-associate_access_token(AccessToken, Context) ->
+get_client_identity(ClientId, _) ->
+    case get(?CLIENT_TABLE, ClientId) of
+        {ok, _} ->
+            {ok, {<<"client">>, ClientId}};
+        _ ->
+            {error, notfound}
+    end.
+
+associate_access_code(AccessCode, Context, _AppContext) ->
+    associate_access_token(AccessCode, Context, _AppContext).
+
+associate_refresh_token(RefreshToken, Context, _) ->
+    put(?REFRESH_TOKEN_TABLE, RefreshToken, Context).
+
+associate_access_token(AccessToken, Context, _) ->
     put(?ACCESS_TOKEN_TABLE, AccessToken, Context).
 
-resolve_access_token(AccessToken) ->
+
+resolve_access_code(AccessCode, _AppContext) ->
+    resolve_access_token(AccessCode, _AppContext).
+
+resolve_refresh_token(RefreshToken, _AppContext) ->
+    resolve_access_token(RefreshToken, _AppContext).
+
+resolve_access_token(AccessToken, _) ->
     %% The case trickery is just here to make sure that
     %% we don't propagate errors that cannot be legally
     %% returned from this function according to the spec.
@@ -138,13 +173,42 @@ resolve_access_token(AccessToken) ->
             Error
     end.
 
-get_redirection_uri(ClientId) ->
+revoke_access_code(AccessCode, _AppContext) ->
+    revoke_access_token(AccessCode, _AppContext).
+
+revoke_access_token(AccessToken, _) ->
+    delete(?ACCESS_TOKEN_TABLE, AccessToken),
+    ok.
+
+revoke_refresh_token(_RefreshToken, _) ->
+    ok.
+
+get_redirection_uri(ClientId, _) ->
     case get(?CLIENT_TABLE, ClientId) of
         {ok, #client{redirect_uri = RedirectUri}} ->
             {ok, RedirectUri};
         Error = {error, notfound} ->
             Error
     end.
+
+verify_redirection_uri(ClientId, ClientUri, _) ->
+    case get(?CLIENT_TABLE, ClientId) of
+        {ok, #client{redirect_uri = RedirUri}} when ClientUri =:= RedirUri ->
+            {ok, RedirUri};
+        _Error ->
+            {error, mismatch}
+    end.
+
+verify_client_scope(_ClientId, Scope, _) ->
+    {ok, Scope}.
+
+verify_resowner_scope(_ResOwner, Scope, _) ->
+    {ok, Scope}.
+
+verify_scope(Scope, Scope, _) ->
+    {ok, Scope};
+verify_scope(_, _, _) ->
+    {error, invalid_scope}.
 
 %%%===================================================================
 %%% Internal functions
@@ -159,7 +223,8 @@ get(Table, Key) ->
     end.
 
 put(Table, Key, Value) ->
-    ets:insert(Table, {Key, Value}).
+    ets:insert(Table, {Key, Value}),
+    ok.
 
 delete(Table, Key) ->
     ets:delete(Table, Key).

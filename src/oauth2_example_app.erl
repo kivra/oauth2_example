@@ -41,12 +41,14 @@
 start(_StartType, _StartArgs) ->
     oauth2_example_backend:start(),
     Dispatch = [{'_', [
-                       {[<<"auth">>], oauth2_example_auth, []},
-                       {[<<"resource">>], oauth2_example_resource, []}
+                       {"/auth", oauth2_example_auth, []},
+                       {"/resource", oauth2_example_resource, []}
                ]}],
-    cowboy:start_listener(oauth2_example_listener, 100,
-                          cowboy_tcp_transport, [{port, 8000}],
-                          cowboy_http_protocol, [{dispatch, Dispatch}]),
+    cowboy:start_http( oauth2_example_listener
+                     , 100
+                     , [{port, 8000}]
+                     , [{env, [{dispatch, cowboy_router:compile(Dispatch)}]}]
+                     ),
     oauth2_example_sup:start_link().
 
 stop(_State) ->

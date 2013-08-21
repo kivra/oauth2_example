@@ -37,6 +37,8 @@
 %%%===================================================================
 
 start() ->
+    application:start(ranch),
+    application:start(crypto),
     application:start(cowboy),
     application:start(oauth2),
     application:start(oauth2_example).
@@ -44,4 +46,6 @@ start() ->
 stop() ->
     application:stop(oauth2_example),
     application:stop(oauth2),
-    application:stop(cowboy).
+    application:stop(cowboy),
+    application:stop(crypto),
+    application:stop(ranch).
