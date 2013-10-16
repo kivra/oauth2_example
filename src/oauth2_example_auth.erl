@@ -123,7 +123,8 @@ process_client_credentials_grant(Req, Params) ->
         cowboy_req:header(<<"authorization">>, Req),
     [Id, Secret] = binary:split(base64:decode(Credentials), <<":">>),
     Scope = proplists:get_value(<<"scope">>, Params),
-    emit_response(oauth2:authorize_client_credentials(Id, Secret, Scope, []), Req2).
+    Auth = oauth2:authorize_client_credentials(Id, Secret, Scope, []),
+    issue_token(Auth, Req2).
 
 process_implicit_grant(Req, Params) ->
     State       = proplists:get_value(<<"state">>, Params),
