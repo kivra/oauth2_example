@@ -49,7 +49,7 @@
 init(_Transport, _Req, _Opts) ->
     %% Compile the DTL template used for the authentication
     %% form in the implicit grant flow.
-    ok = erlydtl:compile(filename:join(["priv", "static", "auth_form.dtl"]),
+    {ok, auth_form} = erlydtl:compile(filename:join(["priv", "static", "auth_form.dtl"]),
                          auth_form),
     {upgrade, protocol, cowboy_rest}.
 
